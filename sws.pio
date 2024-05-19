@@ -1,0 +1,77 @@
+;
+; Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
+;
+; SPDX-License-Identifier: BSD-3-Clause
+;
+
+; SET pin 0 should be mapped to your LED GPIO
+
+.program sws
+    ; Transmit stage
+
+    pull block      ; output bit count
+    out y, 32       ; -> y
+    pull block      ; input bit count
+    out x, 32       ; -> x
+    pull block      ; prime fifo
+    set pindirs, 1  ; set pin to output
+txloop:
+    wait 1 irq 0    ; wait for clock
+    out pins, 1     ; send bit
+    jmp y-- txloop  ; go round again
+    irq 1           ; transmit done
+    set pindirs, 0  ; set pin to input
+
+    ; Receive stage
+
+    jmp !x exit     ; do nothing if no bits to receive
+rxloop:
+    wait 1 irq 0    ; wait for clock
+    in pins, 1      ; receive bit
+    jmp x-- rxloop  ; go round again
+
+    ; Finished
+
+exit:
+    push block      ; flush isr
+    irq 2           ; signal we've finished
+    
+    ; And halt.
+
+halt:
+    jmp halt
+
+% c-sdk {
+// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+
+void sws_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+   pio_sm_config c = sws_program_get_default_config(offset);
+   sm_config_set_in_shift(&c, /* shift_right= */ false, /* autopull= */ true, /* push_threshold= */ 32);
+   sm_config_set_out_shift(&c, /* shift_right= */ false, /* autopull= */ true, /* pull_threshold= */ 32);
+   sm_config_set_out_pins(&c, pin, 1);
+   sm_config_set_set_pins(&c, pin, 1);
+   pio_sm_init(pio, sm, offset, &c);
+}
+%}
+
+.program timer
+    pull block
+    out y, 32
+.wrap_target
+    mov x, y
+loop:
+    jmp x-- loop
+    irq 0
+.wrap
+
+% c-sdk {
+    void timer_program_init(PIO pio, uint sm, uint offset, uint ticks) {
+        pio_sm_config c = timer_program_get_default_config(offset);
+        pio_sm_set_clkdiv(pio, sm, 1.0);
+        pio_sm_init(pio, sm, offset, &c);
+
+        pio_sm_put(pio, sm, ticks);
+    }
+%}
