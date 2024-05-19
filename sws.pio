@@ -14,21 +14,27 @@
     pull block      ; input bit count
     out x, 32       ; -> x
     pull block      ; prime fifo
-    set pindirs, 1  ; set pin to output
+
+    wait 1 irq 0    ; wait for clock
+    jmp !y end_tx   ; do nothing if no bits to send
 txloop:
     wait 1 irq 0    ; wait for clock
     out pins, 1     ; send bit
+    set pindirs, 1  ; set pin to output
     jmp y-- txloop  ; go round again
+end_tx:
+    
     irq 1           ; transmit done
     set pindirs, 0  ; set pin to input
 
     ; Receive stage
 
-    jmp !x exit     ; do nothing if no bits to receive
+    jmp !x end_rx   ; do nothing if no bits to receive
 rxloop:
     wait 1 irq 0    ; wait for clock
     in pins, 1      ; receive bit
     jmp x-- rxloop  ; go round again
+end_rx:
 
     ; Finished
 
@@ -46,7 +52,6 @@ halt:
 
 void sws_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_gpio_init(pio, pin);
-   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
    pio_sm_config c = sws_program_get_default_config(offset);
    sm_config_set_in_shift(&c, /* shift_right= */ false, /* autopull= */ true, /* push_threshold= */ 32);
    sm_config_set_out_shift(&c, /* shift_right= */ false, /* autopull= */ true, /* pull_threshold= */ 32);
