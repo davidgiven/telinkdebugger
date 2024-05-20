@@ -32,6 +32,8 @@
 
 #define reg_debug_runstate REG_ADDR8(0x602)
 
+#define BITS_PER_RECEIVED_BYTE (10 * 10)
+
 static uint32_t input_buffer[BUFFER_SIZE_BITS / 8];
 static uint32_t output_buffer[BUFFER_SIZE_BITS / 8];
 
@@ -196,14 +198,14 @@ static uint8_t read_first_debug_byte(uint16_t address)
     write_data_word(address);
     write_data_byte(0x80);
     write_raw_bits(0, 4);
-    return send_receive(10 * 10);
+    return send_receive(BITS_PER_RECEIVED_BYTE);
 }
 
 static uint8_t read_next_debug_byte()
 {
     output_buffer_bit_ptr = 0;
     write_raw_bits(0, 4);
-    return send_receive(10 * 10);
+    return send_receive(BITS_PER_RECEIVED_BYTE);
 }
 
 static void finish_reading_debug_bytes()
@@ -225,7 +227,7 @@ static uint16_t read_single_debug_word(uint16_t address)
     uint8_t v1 = read_first_debug_byte(address);
     uint8_t v2 = read_next_debug_byte();
     finish_reading_debug_bytes();
-    return (v2 << 8) | v1;
+    return v1 | (v2 << 8);
 }
 
 static void write_first_debug_byte(uint16_t address, uint8_t value)
@@ -263,23 +265,23 @@ static void write_single_debug_byte(uint16_t address, uint8_t value)
 
 static void write_single_debug_word(uint16_t address, uint16_t value)
 {
-    write_first_debug_byte(address, value >> 8);
-    write_next_debug_byte(value & 0xff);
+    write_first_debug_byte(address, value);
+    write_next_debug_byte(value >> 8);
     finish_writing_debug_bytes();
 }
 
-static void write_single_debug_quad(uint16_t address, uint16_t value)
+static void write_single_debug_quad(uint16_t address, uint32_t value)
 {
-    write_first_debug_byte(address, value >> 24);
-    write_next_debug_byte(value >> 16);
+    write_first_debug_byte(address, value);
     write_next_debug_byte(value >> 8);
-    write_next_debug_byte(value);
+    write_next_debug_byte(value >> 16);
+    write_next_debug_byte(value >> 24);
     finish_writing_debug_bytes();
 }
 
 static void halt_target()
 {
-    write_single_debug_byte(reg_debug_runstate, 0x50);
+    write_single_debug_byte(reg_debug_runstate, 0x05);
 }
 
 static void set_target_clock_speed(uint8_t speed)
@@ -300,9 +302,9 @@ static void init_cmd()
     for (int speed = 3; speed < 0x7f; speed++)
     {
         gpio_put(RST_PIN, false);
-        sleep_ms(50);
+        sleep_ms(20);
         gpio_put(RST_PIN, true);
-        sleep_ms(50);
+        sleep_ms(20);
 
         halt_target();
 
@@ -319,6 +321,7 @@ static void init_cmd()
             /* Disable the watchdog timer. */
 
             write_single_debug_quad(reg_tmr_ctl, 0);
+
             return;
         }
     }
@@ -333,6 +336,13 @@ static uint8_t read_hex_byte()
     buffer[1] = getchar();
     buffer[2] = 0;
     return strtoul(buffer, nullptr, 16);
+}
+
+static uint16_t read_hex_word()
+{
+    uint8_t hi = read_hex_byte();
+    uint8_t lo = read_hex_byte();
+    return lo | (hi << 8);
 }
 
 int main()
@@ -385,49 +395,57 @@ int main()
                     break;
                 }
 
-                case 'T':
+                case 's':
                 {
-                    output_buffer_bit_ptr = 0;
-                    break;
-                }
-
-                case 'C':
-                {
-                    uint8_t value = read_hex_byte();
-                    write_cmd_byte(value);
-                    break;
-                }
-
-                case 'D':
-                {
-                    uint8_t value = read_hex_byte();
-                    write_data_byte(value);
+                    uint16_t socid = read_single_debug_word(reg_soc_id);
+                    printf("# socid = %04x\n", socid);
                     break;
                 }
 
                 case 'R':
                 {
-                    uint8_t count = read_hex_byte();
-                    printf("# send/recv %d\n", count);
-                    if (count == 0)
+                    uint16_t address = read_hex_word();
+                    uint16_t count = read_hex_word();
+
+                    if (count)
                     {
-                        write_cmd_byte(0xff);
-                        send_receive(0);
-                    }
-                    else
-                    {
-                        write_raw_bits(0, 4);
+                        uint8_t b = read_first_debug_byte(address);
+                        printf("%02x", b);
+                        count--;
 
                         while (count--)
                         {
-                            uint8_t val = send_receive(10 * 10);
-                            printf("%02x", val);
-
-                            output_buffer_bit_ptr = 0;
-                            write_raw_bits(0, 4);
+                            b = read_next_debug_byte();
+                            printf("%02x", b);
                         }
+
+                        finish_reading_debug_bytes();
                         printf("\n");
                     }
+                    printf("S\n");
+                    break;
+                }
+
+                case 'W':
+                {
+                    uint16_t address = read_hex_word();
+                    uint16_t count = read_hex_word();
+
+                    if (count)
+                    {
+                        uint8_t b = read_hex_byte();
+                        write_first_debug_byte(address, b);
+                        count--;
+
+                        while (count--)
+                        {
+                            b = read_hex_byte();
+                            write_next_debug_byte(b);
+                        }
+
+                        finish_writing_debug_bytes();
+                    }
+
                     printf("S\n");
                     break;
                 }
