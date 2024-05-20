@@ -37,10 +37,7 @@
             "gdbPath": "gdb-multiarch",
             "device": "RP2040",
             "svdFile": "${userHome}/.pico-sdk/sdk/1.5.1/src/rp2040/hardware_regs/rp2040.svd",
-            "runToEntryPoint": "main",
-            // Give restart the same functionality as runToEntryPoint - main
             "postRestartCommands": [
-                "break main",
                 "continue"
             ]
         },

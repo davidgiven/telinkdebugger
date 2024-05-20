@@ -85,7 +85,62 @@ static void write_data_word(uint16_t word)
     write_data_byte(word & 0xff);
 }
 
-static void send_receive(int readcount)
+static bool read_raw_bit()
+{
+    if (input_buffer_bit_ptr < BUFFER_SIZE_BITS)
+    {
+        uint32_t* p = &input_buffer[input_buffer_bit_ptr / 32];
+        uint32_t mask = 0x80000000 >> (input_buffer_bit_ptr & 31);
+        input_buffer_bit_ptr++;
+
+        return *p & mask;
+    }
+
+    return false;
+}
+
+static uint8_t decode()
+{
+    uint8_t result = 0;
+
+    printf("decoding\n");
+
+    input_buffer_bit_ptr = 0;
+
+    bool last_bit = read_raw_bit();
+    while (last_bit && (input_buffer_bit_ptr != BUFFER_SIZE_BITS))
+        last_bit = read_raw_bit();
+
+    for (int i = 0; i < 8; i++)
+    {
+        int lowcount = 0;
+        do
+        {
+            lowcount++;
+            last_bit = read_raw_bit();
+            if (input_buffer_bit_ptr == BUFFER_SIZE_BITS)
+                return result;
+        } while (!last_bit);
+
+        int highcount = 0;
+        do
+        {
+            highcount++;
+            last_bit = read_raw_bit();
+            if (input_buffer_bit_ptr == BUFFER_SIZE_BITS)
+                return result;
+        } while (last_bit);
+
+        result = (result << 1) | (lowcount > highcount);
+
+        if (input_buffer_bit_ptr == BUFFER_SIZE_BITS)
+            break;
+    }
+
+    return result;
+}
+
+static uint8_t send_receive(int readcount)
 {
     sws_program_init(pio0, SM_DATA, sws_program_offset, SWS_PIN);
     pio_sm_set_enabled(pio0, SM_DATA, true);
@@ -101,15 +156,21 @@ static void send_receive(int readcount)
             pio_sm_put(pio0, SM_DATA, *p++);
     }
 
+    p = &input_buffer[0];
     pio_interrupt_clear(pio0, 1);
     while (
         !pio_interrupt_get(pio0, 2) || !pio_sm_is_rx_fifo_empty(pio0, SM_DATA))
     {
         if (!pio_sm_is_rx_fifo_empty(pio0, SM_DATA))
-            pio_sm_get(pio0, SM_DATA);
+            *p++ = pio_sm_get(pio0, SM_DATA);
     }
 
     pio_interrupt_clear(pio0, 2);
+    return 0;
+    if (readcount)
+        return decode();
+    else
+        return 0;
 }
 
 static void halt_target()
@@ -122,6 +183,7 @@ static void halt_target()
     write_cmd_byte(0xff);
 
     send_receive(0);
+    sleep_us(100);
 }
 
 static void set_target_clock_speed(uint8_t speed)
@@ -134,6 +196,55 @@ static void set_target_clock_speed(uint8_t speed)
     write_cmd_byte(0xff);
 
     send_receive(0);
+    sleep_us(100);
+}
+
+static void banner()
+{
+    printf("# Telink debugger bridge\n");
+    printf("# (help placeholder text here)\n");
+}
+
+static void init_cmd()
+{
+    printf("# init\n");
+
+    for (int speed = 6; speed < 0x7f; speed++)
+    {
+        gpio_put(RST_PIN, false);
+        sleep_ms(100);
+        gpio_put(RST_PIN, true);
+
+        for (;;)
+        {
+        printf("halting\n");
+        halt_target();
+
+        printf("set speed %d\n", speed);
+        set_target_clock_speed(speed);
+
+        printf("get soc_id\n");
+        output_buffer_bit_ptr = 0;
+        write_cmd_byte(0x5a);
+        write_data_word(0x007e);
+        write_data_byte(0x80);
+        write_raw_bits(0, 4);
+        send_receive(10 * 5);
+
+        printf("0x%08x\n", input_buffer[0]);
+
+        output_buffer_bit_ptr = 0;
+        write_raw_bits(0, 4);
+        uint8_t v = send_receive(10 * 5);
+        printf("v1=%02x ", v);
+
+        printf("0x%08x\n", input_buffer[0]);
+        output_buffer_bit_ptr = 0;
+        write_cmd_byte(0xff);
+        v = send_receive(0);
+        printf("v2=%02x\n", v);
+        }
+    }
 }
 
 int main()
@@ -147,10 +258,7 @@ int main()
     gpio_set_pulls(SWS_PIN, false, false);
 
     sws_program_offset = pio_add_program(pio0, &sws_program);
-    printf("Loaded program at %d\n", sws_program_offset);
-
-    uint timer_offset = pio_add_program(pio0, &timer_program);
-    printf("Loaded timer at %d\n", timer_offset);
+    int timer_offset = pio_add_program(pio0, &timer_program);
 
     double ticks_per_second = clock_get_hz(clk_peri);
     double debug_clock_rate_hz = 0.500e-6;
@@ -158,6 +266,35 @@ int main()
     timer_program_init(
         pio0, SM_CLOCK, timer_offset, debug_clock_rate_hz * ticks_per_second);
     pio_sm_set_enabled(pio0, SM_CLOCK, true);
+
+    #if 0
+    for (;;)
+    {
+        static bool was_connected = false;
+        bool is_connected = stdio_usb_connected();
+        if (is_connected && !was_connected)
+            banner();
+        was_connected = is_connected;
+
+        if (is_connected)
+        {
+            int c = getchar_timeout_us(0);
+            switch (c)
+            {
+                case 'i':
+                    init_cmd();
+                    break;
+
+                case PICO_ERROR_TIMEOUT:
+                    break;
+
+                default:
+                    printf("?\n");
+                    printf("# unknown command\n");
+            }
+        }
+    }
+    #endif
 
     halt_target();
 
@@ -174,10 +311,12 @@ int main()
 
         output_buffer_bit_ptr = 0;
         write_raw_bits(0, 4);
-        send_receive(10 * 5);
+        uint8_t v = send_receive(10 * 5);
+        //printf("v1=%02x ", v);
 
         output_buffer_bit_ptr = 0;
         write_cmd_byte(0xff);
-        send_receive(0);
+        v = send_receive(0);
+        //printf("v2=%02x\n", v);
     }
 }
