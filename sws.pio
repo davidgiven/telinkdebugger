@@ -55,6 +55,7 @@ void sws_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_sm_config c = sws_program_get_default_config(offset);
    sm_config_set_in_shift(&c, /* shift_right= */ false, /* autopull= */ true, /* push_threshold= */ 32);
    sm_config_set_out_shift(&c, /* shift_right= */ false, /* autopull= */ true, /* pull_threshold= */ 32);
+   sm_config_set_in_pins(&c, pin);
    sm_config_set_out_pins(&c, pin, 1);
    sm_config_set_set_pins(&c, pin, 1);
    pio_sm_init(pio, sm, offset, &c);

@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.5)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)
@@ -49,8 +49,8 @@ pico_set_program_version(telinkdebugger "0.1")
 pico_generate_pio_header(telinkdebugger ${CMAKE_CURRENT_LIST_DIR}/sws.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(telinkdebugger 1)
-pico_enable_stdio_usb(telinkdebugger 0)
+pico_enable_stdio_uart(telinkdebugger 0)
+pico_enable_stdio_usb(telinkdebugger 1)
 
 # Add the standard library to the build
 target_link_libraries(telinkdebugger

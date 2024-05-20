@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
@@ -15,6 +16,22 @@
 
 #define BUFFER_SIZE_BITS 4096
 
+#define REG_ADDR8(n) (n)
+#define REG_ADDR16(n) (n)
+#define REG_ADDR32(n) (n)
+
+#define reg_soc_id REG_ADDR16(0x7e)
+
+#define reg_swire_data REG_ADDR8(0xb0)
+#define reg_swire_ctrl1 REG_ADDR8(0xb1)
+#define reg_swire_clk_div REG_ADDR8(0xb2)
+#define reg_swire_id REG_ADDR8(0xb3)
+
+#define reg_tmr_ctl REG_ADDR32(0x620)
+#define FLD_TMR_WD_EN (1 << 23)
+
+#define reg_debug_runstate REG_ADDR8(0x602)
+
 static uint32_t input_buffer[BUFFER_SIZE_BITS / 8];
 static uint32_t output_buffer[BUFFER_SIZE_BITS / 8];
 
@@ -22,6 +39,8 @@ static int input_buffer_bit_ptr;
 static int output_buffer_bit_ptr;
 
 static int sws_program_offset;
+
+static bool is_connected;
 
 static void write_raw_bit(bool bit)
 {
@@ -103,8 +122,6 @@ static uint8_t decode()
 {
     uint8_t result = 0;
 
-    printf("decoding\n");
-
     input_buffer_bit_ptr = 0;
 
     bool last_bit = read_raw_bit();
@@ -166,37 +183,108 @@ static uint8_t send_receive(int readcount)
     }
 
     pio_interrupt_clear(pio0, 2);
-    return 0;
     if (readcount)
         return decode();
     else
         return 0;
 }
 
-static void halt_target()
+static uint8_t read_first_debug_byte(uint16_t address)
 {
     output_buffer_bit_ptr = 0;
     write_cmd_byte(0x5a);
-    write_data_word(0x0602);
+    write_data_word(address);
+    write_data_byte(0x80);
+    write_raw_bits(0, 4);
+    return send_receive(10 * 10);
+}
+
+static uint8_t read_next_debug_byte()
+{
+    output_buffer_bit_ptr = 0;
+    write_raw_bits(0, 4);
+    return send_receive(10 * 10);
+}
+
+static void finish_reading_debug_bytes()
+{
+    output_buffer_bit_ptr = 0;
+    write_cmd_byte(0xff);
+    send_receive(0);
+}
+
+static uint8_t read_single_debug_byte(uint16_t address)
+{
+    uint8_t value = read_first_debug_byte(address);
+    finish_reading_debug_bytes();
+    return value;
+}
+
+static uint16_t read_single_debug_word(uint16_t address)
+{
+    uint8_t v1 = read_first_debug_byte(address);
+    uint8_t v2 = read_next_debug_byte();
+    finish_reading_debug_bytes();
+    return (v2 << 8) | v1;
+}
+
+static void write_first_debug_byte(uint16_t address, uint8_t value)
+{
+    output_buffer_bit_ptr = 0;
+    write_cmd_byte(0x5a);
+    write_data_word(address);
     write_data_byte(0x00);
-    write_data_byte(0x50);
+    write_data_byte(value);
+
+    send_receive(0);
+}
+
+static void write_next_debug_byte(uint8_t value)
+{
+    output_buffer_bit_ptr = 0;
+    write_data_byte(value);
+
+    send_receive(0);
+}
+
+static void finish_writing_debug_bytes()
+{
+    output_buffer_bit_ptr = 0;
     write_cmd_byte(0xff);
 
     send_receive(0);
-    sleep_us(100);
+}
+
+static void write_single_debug_byte(uint16_t address, uint8_t value)
+{
+    write_first_debug_byte(address, value);
+    finish_writing_debug_bytes();
+}
+
+static void write_single_debug_word(uint16_t address, uint16_t value)
+{
+    write_first_debug_byte(address, value >> 8);
+    write_next_debug_byte(value & 0xff);
+    finish_writing_debug_bytes();
+}
+
+static void write_single_debug_quad(uint16_t address, uint16_t value)
+{
+    write_first_debug_byte(address, value >> 24);
+    write_next_debug_byte(value >> 16);
+    write_next_debug_byte(value >> 8);
+    write_next_debug_byte(value);
+    finish_writing_debug_bytes();
+}
+
+static void halt_target()
+{
+    write_single_debug_byte(reg_debug_runstate, 0x50);
 }
 
 static void set_target_clock_speed(uint8_t speed)
 {
-    output_buffer_bit_ptr = 0;
-    write_cmd_byte(0x5a);
-    write_data_word(0x00b2);
-    write_data_byte(0x00);
-    write_data_byte(speed);
-    write_cmd_byte(0xff);
-
-    send_receive(0);
-    sleep_us(100);
+    write_single_debug_byte(reg_swire_clk_div, speed);
 }
 
 static void banner()
@@ -209,42 +297,42 @@ static void init_cmd()
 {
     printf("# init\n");
 
-    for (int speed = 6; speed < 0x7f; speed++)
+    for (int speed = 3; speed < 0x7f; speed++)
     {
         gpio_put(RST_PIN, false);
-        sleep_ms(100);
+        sleep_ms(50);
         gpio_put(RST_PIN, true);
+        sleep_ms(50);
 
-        for (;;)
-        {
-        printf("halting\n");
         halt_target();
 
-        printf("set speed %d\n", speed);
         set_target_clock_speed(speed);
 
-        printf("get soc_id\n");
-        output_buffer_bit_ptr = 0;
-        write_cmd_byte(0x5a);
-        write_data_word(0x007e);
-        write_data_byte(0x80);
-        write_raw_bits(0, 4);
-        send_receive(10 * 5);
+        uint16_t socid = read_single_debug_word(reg_soc_id);
+        if (socid == 0x5316)
+        {
+            speed *= 2;
+            printf("S\n# using speed %d\n", speed);
+            set_target_clock_speed(speed);
+            is_connected = true;
 
-        printf("0x%08x\n", input_buffer[0]);
+            /* Disable the watchdog timer. */
 
-        output_buffer_bit_ptr = 0;
-        write_raw_bits(0, 4);
-        uint8_t v = send_receive(10 * 5);
-        printf("v1=%02x ", v);
-
-        printf("0x%08x\n", input_buffer[0]);
-        output_buffer_bit_ptr = 0;
-        write_cmd_byte(0xff);
-        v = send_receive(0);
-        printf("v2=%02x\n", v);
+            write_single_debug_quad(reg_tmr_ctl, 0);
+            return;
         }
     }
+
+    printf("E\n# init failed\n");
+}
+
+static uint8_t read_hex_byte()
+{
+    char buffer[3];
+    buffer[0] = getchar();
+    buffer[1] = getchar();
+    buffer[2] = 0;
+    return strtoul(buffer, nullptr, 16);
 }
 
 int main()
@@ -253,40 +341,96 @@ int main()
 
     gpio_init(RST_PIN);
     gpio_set_dir(RST_PIN, true);
-    gpio_put(RST_PIN, true);
+    gpio_put(RST_PIN, false);
 
+    gpio_set_pulls(RST_PIN, false, false);
     gpio_set_pulls(SWS_PIN, false, false);
+    sleep_ms(100);
 
     sws_program_offset = pio_add_program(pio0, &sws_program);
     int timer_offset = pio_add_program(pio0, &timer_program);
 
     double ticks_per_second = clock_get_hz(clk_peri);
-    double debug_clock_rate_hz = 0.500e-6;
+    double debug_clock_rate_hz = 0.250e-6;
 
     timer_program_init(
         pio0, SM_CLOCK, timer_offset, debug_clock_rate_hz * ticks_per_second);
     pio_sm_set_enabled(pio0, SM_CLOCK, true);
 
-    #if 0
     for (;;)
     {
-        static bool was_connected = false;
-        bool is_connected = stdio_usb_connected();
-        if (is_connected && !was_connected)
+        static bool was_usb_connected = false;
+        bool is_usb_connected = stdio_usb_connected();
+        if (is_usb_connected && !was_usb_connected)
             banner();
-        was_connected = is_connected;
+        was_usb_connected = is_usb_connected;
 
-        if (is_connected)
+        if (is_usb_connected)
         {
-            int c = getchar_timeout_us(0);
+            int c = getchar();
             switch (c)
             {
                 case 'i':
                     init_cmd();
                     break;
 
-                case PICO_ERROR_TIMEOUT:
+                case 'r':
+                {
+                    int i = getchar() == '1';
+                    printf("# reset <- %d\n", i);
+                    gpio_put(RST_PIN, i);
+                    if (i == 0)
+                        is_connected = false;
+                    printf("S\n");
                     break;
+                }
+
+                case 'T':
+                {
+                    output_buffer_bit_ptr = 0;
+                    break;
+                }
+
+                case 'C':
+                {
+                    uint8_t value = read_hex_byte();
+                    write_cmd_byte(value);
+                    break;
+                }
+
+                case 'D':
+                {
+                    uint8_t value = read_hex_byte();
+                    write_data_byte(value);
+                    break;
+                }
+
+                case 'R':
+                {
+                    uint8_t count = read_hex_byte();
+                    printf("# send/recv %d\n", count);
+                    if (count == 0)
+                    {
+                        write_cmd_byte(0xff);
+                        send_receive(0);
+                    }
+                    else
+                    {
+                        write_raw_bits(0, 4);
+
+                        while (count--)
+                        {
+                            uint8_t val = send_receive(10 * 10);
+                            printf("%02x", val);
+
+                            output_buffer_bit_ptr = 0;
+                            write_raw_bits(0, 4);
+                        }
+                        printf("\n");
+                    }
+                    printf("S\n");
+                    break;
+                }
 
                 default:
                     printf("?\n");
@@ -294,29 +438,6 @@ int main()
             }
         }
     }
-    #endif
 
     halt_target();
-
-    for (;;)
-    {
-        set_target_clock_speed(10);
-
-        output_buffer_bit_ptr = 0;
-        write_cmd_byte(0x5a);
-        write_data_word(0x007e);
-        write_data_byte(0x80);
-        write_raw_bits(0, 4);
-        send_receive(10 * 5);
-
-        output_buffer_bit_ptr = 0;
-        write_raw_bits(0, 4);
-        uint8_t v = send_receive(10 * 5);
-        //printf("v1=%02x ", v);
-
-        output_buffer_bit_ptr = 0;
-        write_cmd_byte(0xff);
-        v = send_receive(0);
-        //printf("v2=%02x\n", v);
-    }
 }
