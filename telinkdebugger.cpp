@@ -47,6 +47,7 @@ static bool is_connected;
 
 static void write_nine_bit_byte(uint16_t byte)
 {
+   pio_gpio_init(pio0, SWS_PIN);
     pio_interrupt_clear(pio0, 0);
 
     pio_sm_put(pio0, SM_TX, byte);
@@ -74,10 +75,11 @@ static void write_data_word(uint16_t word)
 
 static uint8_t read_byte()
 {
-    pio_sm_clear_fifos(pio0, SM_RX);
-    pio_sm_exec_wait_blocking(pio0, SM_RX, sws_rx_program_offset); // JMP offset
+   pio_gpio_init(pio1, SWS_PIN);
+    pio_sm_clear_fifos(pio1, SM_RX);
+    pio_sm_exec_wait_blocking(pio1, SM_RX, sws_rx_program_offset); // JMP offset
 
-    uint32_t value = pio_sm_get_blocking(pio0, SM_RX);
+    uint32_t value = pio_sm_get_blocking(pio1, SM_RX);
     sleep_us(400);
     return value;
 }
@@ -234,7 +236,6 @@ int main()
 
     gpio_set_pulls(RST_PIN, false, false);
     gpio_set_pulls(SWS_PIN, true, false);
-    sleep_ms(100);
 
     while (!stdio_usb_connected())
         ;
@@ -243,9 +244,9 @@ int main()
     sws_tx_program_init(pio0, SM_TX, sws_tx_program_offset, SWS_PIN, 1.0e6);
     pio_sm_set_enabled(pio0, SM_TX, true);
 
-    sws_rx_program_offset = pio_add_program(pio0, &sws_rx_program);
-    sws_rx_program_init(pio0, SM_RX, sws_rx_program_offset, SWS_PIN);
-    pio_sm_set_enabled(pio0, SM_RX, true);
+    sws_rx_program_offset = pio_add_program(pio1, &sws_rx_program);
+    sws_rx_program_init(pio1, SM_RX, sws_rx_program_offset, SWS_PIN);
+    pio_sm_set_enabled(pio1, SM_RX, true);
 
     printf("starting\n");
     for (;;)
@@ -254,7 +255,7 @@ int main()
         sleep_ms(100);
         gpio_put(RST_PIN, 1);
         sleep_ms(100);
-        // halt_target();
+        halt_target();
 
         uint16_t socid = read_single_debug_word(reg_soc_id);
         printf("socid=%04x\n");
