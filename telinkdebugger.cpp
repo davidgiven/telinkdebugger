@@ -11,8 +11,8 @@
 #define RST_PIN 21
 #define LED_PIN PICO_DEFAULT_LED_PIN
 
-#define SM_CLOCK 0
-#define SM_DATA 1
+#define SM_RX 0
+#define SM_TX 1
 
 #define BUFFER_SIZE_BITS 4096
 
@@ -40,64 +40,30 @@ static uint32_t output_buffer[BUFFER_SIZE_BITS / 8];
 static int input_buffer_bit_ptr;
 static int output_buffer_bit_ptr;
 
-static int sws_program_offset;
+static int sws_tx_program_offset;
+static int sws_rx_program_offset;
 
 static bool is_connected;
 
-static void write_raw_bit(bool bit)
+static void write_nine_bit_byte(uint16_t byte)
 {
-    if (output_buffer_bit_ptr < BUFFER_SIZE_BITS)
-    {
-        uint32_t* p = &output_buffer[output_buffer_bit_ptr / 32];
-        uint32_t mask = 0x80000000 >> (output_buffer_bit_ptr & 31);
-        if (bit)
-            *p |= mask;
-        else
-            *p &= ~mask;
-        output_buffer_bit_ptr++;
-    }
-}
+    pio_interrupt_clear(pio0, 0);
 
-static void write_raw_bits(bool bit, int count)
-{
-    while (count--)
-        write_raw_bit(bit);
-}
+    pio_sm_put(pio0, SM_TX, byte);
 
-static void write_baked_bit(bool bit)
-{
-    if (bit)
-    {
-        write_raw_bits(0, 4);
-        write_raw_bit(1);
-    }
-    else
-    {
-        write_raw_bit(0);
-        write_raw_bits(1, 4);
-    }
-}
-
-static void write_byte(uint8_t byte)
-{
-    for (int i = 0; i < 8; i++)
-    {
-        write_baked_bit(byte & 0x80);
-        byte <<= 1;
-    }
-    write_baked_bit(0);
+    while (!pio_interrupt_get(pio0, 0))
+        ;
+    pio_interrupt_clear(pio0, 0);
 }
 
 static void write_cmd_byte(uint8_t byte)
 {
-    write_baked_bit(1);
-    write_byte(byte);
+    write_nine_bit_byte(0x100 | byte);
 }
 
 static void write_data_byte(uint8_t byte)
 {
-    write_baked_bit(0);
-    write_byte(byte);
+    write_nine_bit_byte(0x000 | byte);
 }
 
 static void write_data_word(uint16_t word)
@@ -106,113 +72,33 @@ static void write_data_word(uint16_t word)
     write_data_byte(word & 0xff);
 }
 
-static bool read_raw_bit()
+static uint8_t read_byte()
 {
-    if (input_buffer_bit_ptr < BUFFER_SIZE_BITS)
-    {
-        uint32_t* p = &input_buffer[input_buffer_bit_ptr / 32];
-        uint32_t mask = 0x80000000 >> (input_buffer_bit_ptr & 31);
-        input_buffer_bit_ptr++;
+    pio_sm_clear_fifos(pio0, SM_RX);
+    pio_sm_exec_wait_blocking(pio0, SM_RX, sws_rx_program_offset); // JMP offset
 
-        return *p & mask;
-    }
-
-    return false;
-}
-
-static uint8_t decode()
-{
-    uint8_t result = 0;
-
-    input_buffer_bit_ptr = 0;
-
-    bool last_bit = read_raw_bit();
-    while (last_bit && (input_buffer_bit_ptr != BUFFER_SIZE_BITS))
-        last_bit = read_raw_bit();
-
-    for (int i = 0; i < 8; i++)
-    {
-        int lowcount = 0;
-        do
-        {
-            lowcount++;
-            last_bit = read_raw_bit();
-            if (input_buffer_bit_ptr == BUFFER_SIZE_BITS)
-                return result;
-        } while (!last_bit);
-
-        int highcount = 0;
-        do
-        {
-            highcount++;
-            last_bit = read_raw_bit();
-            if (input_buffer_bit_ptr == BUFFER_SIZE_BITS)
-                return result;
-        } while (last_bit);
-
-        result = (result << 1) | (lowcount > highcount);
-
-        if (input_buffer_bit_ptr == BUFFER_SIZE_BITS)
-            break;
-    }
-
-    return result;
-}
-
-static uint8_t send_receive(int readcount)
-{
-    sws_program_init(pio0, SM_DATA, sws_program_offset, SWS_PIN);
-    pio_sm_set_enabled(pio0, SM_DATA, true);
-
-    pio_sm_put_blocking(
-        pio0, SM_DATA, output_buffer_bit_ptr);     // bits to transmit
-    pio_sm_put_blocking(pio0, SM_DATA, readcount); // bits to receive
-
-    uint32_t* p = &output_buffer[0];
-    while (!pio_interrupt_get(pio0, 1))
-    {
-        if (pio_sm_is_tx_fifo_empty(pio0, SM_DATA))
-            pio_sm_put(pio0, SM_DATA, *p++);
-    }
-
-    p = &input_buffer[0];
-    pio_interrupt_clear(pio0, 1);
-    while (
-        !pio_interrupt_get(pio0, 2) || !pio_sm_is_rx_fifo_empty(pio0, SM_DATA))
-    {
-        if (!pio_sm_is_rx_fifo_empty(pio0, SM_DATA))
-            *p++ = pio_sm_get(pio0, SM_DATA);
-    }
-
-    pio_interrupt_clear(pio0, 2);
-    if (readcount)
-        return decode();
-    else
-        return 0;
+    uint32_t value = pio_sm_get_blocking(pio0, SM_RX);
+    sleep_us(400);
+    return value;
 }
 
 static uint8_t read_first_debug_byte(uint16_t address)
 {
-    output_buffer_bit_ptr = 0;
     write_cmd_byte(0x5a);
     write_data_word(address);
     write_data_byte(0x80);
-    write_raw_bits(0, 4);
-    return send_receive(BITS_PER_RECEIVED_BYTE);
+
+    return read_byte();
 }
 
 static uint8_t read_next_debug_byte()
 {
-    output_buffer_bit_ptr = 0;
-    write_raw_bits(0, 4);
-    return send_receive(BITS_PER_RECEIVED_BYTE);
+    return read_byte();
 }
 
 static void finish_reading_debug_bytes()
 {
-    output_buffer_bit_ptr = 0;
     write_cmd_byte(0xff);
-    send_receive(0);
 }
 
 static uint8_t read_single_debug_byte(uint16_t address)
@@ -232,29 +118,20 @@ static uint16_t read_single_debug_word(uint16_t address)
 
 static void write_first_debug_byte(uint16_t address, uint8_t value)
 {
-    output_buffer_bit_ptr = 0;
     write_cmd_byte(0x5a);
     write_data_word(address);
     write_data_byte(0x00);
     write_data_byte(value);
-
-    send_receive(0);
 }
 
 static void write_next_debug_byte(uint8_t value)
 {
-    output_buffer_bit_ptr = 0;
     write_data_byte(value);
-
-    send_receive(0);
 }
 
 static void finish_writing_debug_bytes()
 {
-    output_buffer_bit_ptr = 0;
     write_cmd_byte(0xff);
-
-    send_receive(0);
 }
 
 static void write_single_debug_byte(uint16_t address, uint8_t value)
@@ -295,6 +172,7 @@ static void banner()
     printf("# (help placeholder text here)\n");
 }
 
+#if 0
 static void init_cmd()
 {
     printf("# init\n");
@@ -328,6 +206,7 @@ static void init_cmd()
 
     printf("E\n# init failed\n");
 }
+#endif
 
 static uint8_t read_hex_byte()
 {
@@ -354,9 +233,36 @@ int main()
     gpio_put(RST_PIN, false);
 
     gpio_set_pulls(RST_PIN, false, false);
-    gpio_set_pulls(SWS_PIN, false, false);
+    gpio_set_pulls(SWS_PIN, true, false);
     sleep_ms(100);
 
+    while (!stdio_usb_connected())
+        ;
+
+    sws_tx_program_offset = pio_add_program(pio0, &sws_tx_program);
+    sws_tx_program_init(pio0, SM_TX, sws_tx_program_offset, SWS_PIN, 1.0e6);
+    pio_sm_set_enabled(pio0, SM_TX, true);
+
+    sws_rx_program_offset = pio_add_program(pio0, &sws_rx_program);
+    sws_rx_program_init(pio0, SM_RX, sws_rx_program_offset, SWS_PIN);
+    pio_sm_set_enabled(pio0, SM_RX, true);
+
+    printf("starting\n");
+    for (;;)
+    {
+        gpio_put(RST_PIN, 0);
+        sleep_ms(100);
+        gpio_put(RST_PIN, 1);
+        sleep_ms(100);
+        // halt_target();
+
+        uint16_t socid = read_single_debug_word(reg_soc_id);
+        printf("socid=%04x\n");
+
+        sleep_ms(1);
+    }
+
+#if 0
     sws_program_offset = pio_add_program(pio0, &sws_program);
     int timer_offset = pio_add_program(pio0, &timer_program);
 
@@ -458,4 +364,5 @@ int main()
     }
 
     halt_target();
+#endif
 }

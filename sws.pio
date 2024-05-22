@@ -1,10 +1,80 @@
-;
-; Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
-;
-; SPDX-License-Identifier: BSD-3-Clause
-;
+.program sws_tx
+.side_set 1 opt
+    ; Sends nine bits of data.
 
-; SET pin 0 should be mapped to your LED GPIO
+    set pindirs, 0  ; idle with the transmitter off
+    irq 0           ; signal completion
+    pull block      ; block until data shows up
+    out null, 23    ; align data left
+    set y, 8        ; -1 because the test is at the end
+    
+    set pindirs, 1  ; turn the transmitter on
+    set pins, 1     ; ...and high
+
+    ; Four cycles per bit
+loop:
+    out x, 1            side 0  ; 0
+    jmp !x emit_zero [2]        ; 1..3
+emit_one:
+    nop [3+4]                   ; low 2+3
+    nop [3]                     ; low 4
+    nop [3-1]           side 1  ; high, minus one bit for the jump
+    jmp y-- loop                ; go for next bit
+    jmp end             side 0  ; begin terminator
+
+emit_zero:
+    nop [3+4]           side 1  ; high 1 + 2
+    nop [3+4-1]                 ; high 3 + 4, minus one bit for the jump
+    jmp y-- loop                ; go for next bit
+    nop                 side 0  ; begin terminator
+end:
+    nop [2]                     ; send a one bit to terminate
+    nop [3+4]           side 1  ; high 1 + 2
+    nop [3+4]                   ; high 3 + 4
+.wrap                           ; and go again
+
+% c-sdk {
+void sws_tx_program_init(PIO pio, uint sm, uint offset, uint pin, double clock_hz) {
+   pio_gpio_init(pio, pin);
+   pio_sm_config c = sws_tx_program_get_default_config(offset);
+   sm_config_set_out_shift(&c, /* shift_right= */ false, /* autopull= */ false, /* pull_threshold= */ 32);
+   sm_config_set_set_pins(&c, pin, 1);
+   sm_config_set_sideset_pins(&c, pin);
+    
+   pio_sm_init(pio, sm, offset, &c);
+   pio_sm_set_clkdiv(pio, sm, 32);
+}
+%}
+
+.program sws_rx
+.side_set 1 opt
+    ; Make a clean low period to trigger transmission.
+
+    set pindirs, 1      side 0  ; transmitter on, low
+    set x, 31
+delay_loop:
+    jmp x-- delay_loop [7]    
+    set pindirs, 0              ; transmitter off
+
+    set x, 5
+    in x, 32
+    push block
+
+.wrap_target        ; infinite loop
+.wrap
+
+% c-sdk {
+void sws_rx_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+   pio_sm_config c = sws_rx_program_get_default_config(offset);
+   sm_config_set_in_shift(&c, /* shift_right= */ false, /* autopush= */ false, /* push_threshold= */ 32);
+   sm_config_set_set_pins(&c, pin, 1);
+   sm_config_set_jmp_pin(&c, pin);
+   sm_config_set_sideset_pins(&c, pin);
+    
+   pio_sm_init(pio, sm, offset, &c);
+}
+%}
 
 .program sws
     ; Transmit stage
