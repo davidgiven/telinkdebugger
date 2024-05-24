@@ -81,9 +81,7 @@ static uint8_t read_byte()
     pio_sm_clear_fifos(pio1, SM_RX);
     pio_sm_exec_wait_blocking(pio1, SM_RX, sws_rx_program_offset); // JMP offset
 
-    uint8_t value = pio_sm_get_blocking(pio1, SM_RX);
-    printf("%08x\n", value);
-    return value;
+    return pio_sm_get_blocking(pio1, SM_RX);
 }
 
 static uint8_t read_first_debug_byte(uint16_t address)
@@ -176,41 +174,31 @@ static void banner()
     printf("# (help placeholder text here)\n");
 }
 
-#if 0
 static void init_cmd()
 {
     printf("# init\n");
 
-    for (int speed = 3; speed < 0x7f; speed++)
+    gpio_put(RST_PIN, false);
+    sleep_ms(20);
+    gpio_put(RST_PIN, true);
+    sleep_ms(20);
+
+    halt_target();
+
+    uint16_t socid = read_single_debug_word(reg_soc_id);
+    if (socid == 0x5316)
     {
-        gpio_put(RST_PIN, false);
-        sleep_ms(20);
-        gpio_put(RST_PIN, true);
-        sleep_ms(20);
+        printf("S\n");
+        is_connected = true;
 
-        halt_target();
+        /* Disable the watchdog timer. */
 
-        set_target_clock_speed(speed);
-
-        uint16_t socid = read_single_debug_word(reg_soc_id);
-        if (socid == 0x5316)
-        {
-            speed *= 2;
-            printf("S\n# using speed %d\n", speed);
-            set_target_clock_speed(speed);
-            is_connected = true;
-
-            /* Disable the watchdog timer. */
-
-            write_single_debug_quad(reg_tmr_ctl, 0);
-
-            return;
-        }
+        write_single_debug_quad(reg_tmr_ctl, 0);
+        return;
     }
 
     printf("E\n# init failed\n");
 }
-#endif
 
 static uint8_t read_hex_byte()
 {
@@ -228,6 +216,12 @@ static uint16_t read_hex_word()
     return lo | (hi << 8);
 }
 
+void set_tx_clock(double clock_hz)
+{
+    sws_tx_program_init(pio0, SM_TX, sws_tx_program_offset, SWS_PIN, clock_hz);
+    pio_sm_set_enabled(pio0, SM_TX, true);
+}
+
 int main()
 {
     stdio_init_all();
@@ -240,42 +234,12 @@ int main()
     gpio_set_pulls(SWS_PIN, true, false);
     gpio_set_pulls(DBG_PIN, false, false);
 
-    while (!stdio_usb_connected())
-        ;
-
     sws_tx_program_offset = pio_add_program(pio0, &sws_tx_program);
-    sws_tx_program_init(pio0, SM_TX, sws_tx_program_offset, SWS_PIN, 1.0e6);
-    pio_sm_set_enabled(pio0, SM_TX, true);
+    set_tx_clock(10.0e6);
 
     sws_rx_program_offset = pio_add_program(pio1, &sws_rx_program);
     sws_rx_program_init(pio1, SM_RX, sws_rx_program_offset, SWS_PIN);
     pio_sm_set_enabled(pio1, SM_RX, true);
-
-    printf("starting\n");
-    for (;;)
-    {
-        gpio_put(RST_PIN, 0);
-        sleep_ms(100);
-        gpio_put(RST_PIN, 1);
-        sleep_ms(100);
-        halt_target();
-
-        uint16_t socid = read_single_debug_word(reg_soc_id);
-        printf("socid=%04x\n", socid);
-
-        sleep_ms(1);
-    }
-
-#if 0
-    sws_program_offset = pio_add_program(pio0, &sws_program);
-    int timer_offset = pio_add_program(pio0, &timer_program);
-
-    double ticks_per_second = clock_get_hz(clk_peri);
-    double debug_clock_rate_hz = 0.250e-6;
-
-    timer_program_init(
-        pio0, SM_CLOCK, timer_offset, debug_clock_rate_hz * ticks_per_second);
-    pio_sm_set_enabled(pio0, SM_CLOCK, true);
 
     for (;;)
     {
@@ -308,7 +272,7 @@ int main()
                 case 's':
                 {
                     uint16_t socid = read_single_debug_word(reg_soc_id);
-                    printf("# socid = %04x\n", socid);
+                    printf("# socid = %04x\nS\n", socid);
                     break;
                 }
 
@@ -366,7 +330,4 @@ int main()
             }
         }
     }
-
-    halt_target();
-#endif
 }

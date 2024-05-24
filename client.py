@@ -31,12 +31,10 @@ def readhex():
 
 
 def connect():
-    print("Connecting...")
     serial_port.write(b"i")
     c = readchar()
     if c != b"S":
         raise BaseException("Connection failed")
-    print("Done")
 
 
 def read_bytes_from_target(addr, len):
@@ -137,23 +135,28 @@ def get_soc_id_main(args):
 
 def read_flash_main(args):
     connect()
-
+    print(
+        "Reading flash from 0x%08x-0x%08x into '%s':"
+        % (args.address, args.address + args.length, args.filename)
+    )
     with open(args.filename, "wb") as file:
         for base in range(args.address, args.length, 1024):
             print("0x%08x" % base)
             b = read_flash_block(base, 1024)
             file.write(b)
 
+def reset_main(args):
+    connect()
 
 def main():
     args_parser = argparse.ArgumentParser(description="Telink debugger client")
     args_parser.add_argument("--serial-port", type=str, required=True)
     subparsers = args_parser.add_subparsers(dest="cmd", required=True)
 
-    read_flash_parser = subparsers.add_parser("show")
-    read_flash_parser.set_defaults(func=show_main)
-    read_flash_parser.add_argument("address", type=lambda x: int(x, 0))
-    read_flash_parser.add_argument(
+    show_parser = subparsers.add_parser("show")
+    show_parser.set_defaults(func=show_main)
+    show_parser.add_argument("address", type=lambda x: int(x, 0))
+    show_parser.add_argument(
         "length", nargs="?", default=0x100, type=lambda x: int(x, 0)
     )
 
@@ -169,6 +172,9 @@ def main():
 
     get_soc_id_parser = subparsers.add_parser("get_soc_id")
     get_soc_id_parser.set_defaults(func=get_soc_id_main)
+
+    reset_parser = subparsers.add_parser("reset")
+    reset_parser.set_defaults(func=reset_main)
 
     args = args_parser.parse_args()
 

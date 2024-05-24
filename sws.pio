@@ -40,8 +40,10 @@ void sws_tx_program_init(PIO pio, uint sm, uint offset, uint pin, double clock_h
    sm_config_set_set_pins(&c, pin, 1);
    sm_config_set_sideset_pins(&c, pin);
     
+   double sysclock_hz = clock_get_hz(clk_sys);
+   sm_config_set_clkdiv(&c, sysclock_hz / clock_hz);
+   
    pio_sm_init(pio, sm, offset, &c);
-   pio_sm_set_clkdiv(pio, sm, 32);
 }
 %}
 
@@ -50,7 +52,7 @@ void sws_tx_program_init(PIO pio, uint sm, uint offset, uint pin, double clock_h
     ; Make a clean low period to trigger transmission.
 
     set pins, 0
-    set pindirs, 5      side 0  ; transmitter on, low
+    set pindirs, 1      side 0  ; transmitter on, low
     set x, 31
 delay_loop:
     jmp x-- delay_loop [7]    
@@ -83,26 +85,26 @@ low_longer_than_high:
     set x, 1
     in x, 1
 end_loop:
-    set pindirs, 4
-    set pins, 4
-    set pindirs, 0
-    set pins, 0
     
     jmp y-- bit_loop
+
+    wait 1 pin 0                ; wait until the device stops sending
+    
+    set x, 31                   ; and then a bit more
+delay_loop2:
+    jmp x-- delay_loop2 [7]    
 
     push block
 
 end:
     jmp end
-.wrap_target        ; infinite loop
-.wrap
 
 % c-sdk {
 void sws_rx_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_sm_config c = sws_rx_program_get_default_config(offset);
    sm_config_set_in_shift(&c, /* shift_right= */ false, /* autopush= */ false, /* push_threshold= */ 32);
    sm_config_set_in_pins(&c, pin);
-   sm_config_set_set_pins(&c, pin, 3);
+   sm_config_set_set_pins(&c, pin, 1);
    sm_config_set_jmp_pin(&c, pin);
    sm_config_set_sideset_pins(&c, pin);
     
