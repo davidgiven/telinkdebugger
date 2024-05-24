@@ -74,6 +74,18 @@ def write_quad_to_target(addr, quad):
     write_bytes_to_target(addr, quad.to_bytes(4, "little"))
 
 
+def read_flash_status():
+    write_byte_to_target(0x0D, 0x00)  # flash CS enable
+    write_byte_to_target(0x0C, 0x03)  # read flash command
+
+    write_byte_to_target(0x0C, 0xFF)
+    byte = read_byte_from_target(0x0C)
+
+    write_byte_to_target(0x0D, 0x01)  # flash CS disable
+
+    return byte
+
+
 def read_flash_block(addr, len):
     write_byte_to_target(0x0D, 0x00)  # flash CS enable
     write_byte_to_target(0x0C, 0x03)  # read flash command
@@ -133,6 +145,12 @@ def get_soc_id_main(args):
     print("SOC ID: 0x%04x\n" % b)
 
 
+def flash_status_main(arg):
+    connect()
+    b = read_flash_status()
+    print("Flash status byte: 0x%02x\n" % b)
+
+
 def read_flash_main(args):
     connect()
     print(
@@ -145,8 +163,10 @@ def read_flash_main(args):
             b = read_flash_block(base, 1024)
             file.write(b)
 
+
 def reset_main(args):
     connect()
+
 
 def main():
     args_parser = argparse.ArgumentParser(description="Telink debugger client")
@@ -159,6 +179,9 @@ def main():
     show_parser.add_argument(
         "length", nargs="?", default=0x100, type=lambda x: int(x, 0)
     )
+
+    flash_status_parser = subparsers.add_parser("flash_status")
+    flash_status_parser.set_defaults(func=flash_status_main)
 
     read_flash_parser = subparsers.add_parser("read_flash")
     read_flash_parser.set_defaults(func=read_flash_main)
