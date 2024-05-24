@@ -9,6 +9,7 @@
 
 #define SWS_PIN 20
 #define RST_PIN 21
+#define DBG_PIN 22
 #define LED_PIN PICO_DEFAULT_LED_PIN
 
 #define SM_RX 0
@@ -47,7 +48,7 @@ static bool is_connected;
 
 static void write_nine_bit_byte(uint16_t byte)
 {
-   pio_gpio_init(pio0, SWS_PIN);
+    pio_gpio_init(pio0, SWS_PIN);
     pio_interrupt_clear(pio0, 0);
 
     pio_sm_put(pio0, SM_TX, byte);
@@ -75,12 +76,13 @@ static void write_data_word(uint16_t word)
 
 static uint8_t read_byte()
 {
-   pio_gpio_init(pio1, SWS_PIN);
+    pio_gpio_init(pio1, SWS_PIN);
+    pio_gpio_init(pio1, DBG_PIN);
     pio_sm_clear_fifos(pio1, SM_RX);
     pio_sm_exec_wait_blocking(pio1, SM_RX, sws_rx_program_offset); // JMP offset
 
-    uint32_t value = pio_sm_get_blocking(pio1, SM_RX);
-    sleep_us(400);
+    uint8_t value = pio_sm_get_blocking(pio1, SM_RX);
+    printf("%08x\n", value);
     return value;
 }
 
@@ -236,6 +238,7 @@ int main()
 
     gpio_set_pulls(RST_PIN, false, false);
     gpio_set_pulls(SWS_PIN, true, false);
+    gpio_set_pulls(DBG_PIN, false, false);
 
     while (!stdio_usb_connected())
         ;
@@ -258,7 +261,7 @@ int main()
         halt_target();
 
         uint16_t socid = read_single_debug_word(reg_soc_id);
-        printf("socid=%04x\n");
+        printf("socid=%04x\n", socid);
 
         sleep_ms(1);
     }

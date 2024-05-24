@@ -49,16 +49,51 @@ void sws_tx_program_init(PIO pio, uint sm, uint offset, uint pin, double clock_h
 .side_set 1 opt
     ; Make a clean low period to trigger transmission.
 
-    set pindirs, 1      side 0  ; transmitter on, low
+    set pins, 0
+    set pindirs, 5      side 0  ; transmitter on, low
     set x, 31
 delay_loop:
     jmp x-- delay_loop [7]    
+    set pins, 1 [1]             ; bring the output high to avoid a long rise from the weak pullups
     set pindirs, 0              ; transmitter off
+    wait 1 pin 0                ; just to be safe
 
-    set x, 5
-    in x, 32
+    set y, 7                    ; deliberately n-1
+bit_loop:
+    wait 0 pin 0
+
+    mov x, !null
+zero_loop:
+    jmp pin end_zero_loop
+    jmp x-- zero_loop [1]
+end_zero_loop:
+
+    mov x, !x                   ; approximately negate
+    
+one_loop:
+    jmp pin still_one
+    jmp low_longer_than_high
+still_one:
+    jmp x-- one_loop
+high_longer_than_low:
+    in null, 1
+    jmp end_loop
+
+low_longer_than_high:
+    set x, 1
+    in x, 1
+end_loop:
+    set pindirs, 4
+    set pins, 4
+    set pindirs, 0
+    set pins, 0
+    
+    jmp y-- bit_loop
+
     push block
 
+end:
+    jmp end
 .wrap_target        ; infinite loop
 .wrap
 
@@ -66,7 +101,8 @@ delay_loop:
 void sws_rx_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_sm_config c = sws_rx_program_get_default_config(offset);
    sm_config_set_in_shift(&c, /* shift_right= */ false, /* autopush= */ false, /* push_threshold= */ 32);
-   sm_config_set_set_pins(&c, pin, 1);
+   sm_config_set_in_pins(&c, pin);
+   sm_config_set_set_pins(&c, pin, 3);
    sm_config_set_jmp_pin(&c, pin);
    sm_config_set_sideset_pins(&c, pin);
     
