@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 import argparse
 import serial
-import time
+from tqdm import tqdm
 import sys
 
 serial_port = None
@@ -133,7 +133,7 @@ def hexdump(bytes, address):
         a += 1
 
 
-def show_main(args):
+def dump_main(args):
     connect()
     b = read_bytes_from_target(args.address, args.length)
     hexdump(b, args.address)
@@ -151,6 +151,22 @@ def flash_status_main(arg):
     print("Flash status byte: 0x%02x\n" % b)
 
 
+def read_ram_main(args):
+    connect()
+    print(
+        "Reading RAM from 0x%04x-0x%04x into '%s':"
+        % (args.address, args.address + args.length, args.filename)
+    )
+    with open(args.filename, "wb") as file:
+        for base in tqdm(
+            iterable=range(args.address, args.address + args.length, 1024),
+            unit_scale=1024,
+            unit="B",
+        ):
+            b = read_bytes_from_target(base, 1024)
+            file.write(b)
+
+
 def read_flash_main(args):
     connect()
     print(
@@ -158,8 +174,11 @@ def read_flash_main(args):
         % (args.address, args.address + args.length, args.filename)
     )
     with open(args.filename, "wb") as file:
-        for base in range(args.address, args.length, 1024):
-            print("0x%08x" % base)
+        for base in tqdm(
+            iterable=range(args.address, args.address + args.length, 1024),
+            unit_scale=1024,
+            unit="B",
+        ):
             b = read_flash_block(base, 1024)
             file.write(b)
 
@@ -173,11 +192,21 @@ def main():
     args_parser.add_argument("--serial-port", type=str, required=True)
     subparsers = args_parser.add_subparsers(dest="cmd", required=True)
 
-    show_parser = subparsers.add_parser("show")
-    show_parser.set_defaults(func=show_main)
-    show_parser.add_argument("address", type=lambda x: int(x, 0))
-    show_parser.add_argument(
+    dump_parser = subparsers.add_parser("dump")
+    dump_parser.set_defaults(func=dump_main)
+    dump_parser.add_argument("address", type=lambda x: int(x, 0))
+    dump_parser.add_argument(
         "length", nargs="?", default=0x100, type=lambda x: int(x, 0)
+    )
+
+    read_ram_parser = subparsers.add_parser("read_ram")
+    read_ram_parser.set_defaults(func=read_ram_main)
+    read_ram_parser.add_argument("filename", type=str)
+    read_ram_parser.add_argument(
+        "address", nargs="?", default=0, type=lambda x: int(x, 0)
+    )
+    read_ram_parser.add_argument(
+        "length", nargs="?", default=0xC000, type=lambda x: int(x, 0)
     )
 
     flash_status_parser = subparsers.add_parser("flash_status")
