@@ -6,6 +6,8 @@ import sys
 
 serial_port = None
 
+FLASH_SECTOR_SIZE = 4096
+
 
 def readchar():
     while True:
@@ -35,6 +37,10 @@ def connect():
     c = readchar()
     if c != b"S":
         raise BaseException("Connection failed")
+
+
+def run():
+    serial_port.write(b"g")
 
 
 def read_bytes_from_target(addr, len):
@@ -106,6 +112,54 @@ def read_flash_block(addr, len):
     return data
 
 
+def wait_for_flash_chip():
+    while True:
+        write_byte_to_target(0x0D, 0x00)  # flash CS enable
+        write_byte_to_target(0x0C, 0x05)  # read_status_command
+        write_byte_to_target(0x0C, 0xFF)  # dummy
+        s = read_byte_from_target(0x0C)
+        write_byte_to_target(0x0D, 0x01)  # flash CS disable
+
+        if s & 0x20:
+            raise BaseException("flash write failed")
+        if not (s & 0x01):
+            break
+
+
+def erase_flash_sector(addr):
+    write_byte_to_target(0x0D, 0x00)  # flash CS enable
+    write_byte_to_target(0x0C, 0x06)  # write enable command
+    write_byte_to_target(0x0D, 0x01)  # flash CS disable
+
+    write_byte_to_target(0x0D, 0x00)  # flash CS enable
+    write_byte_to_target(0x0C, 0x20)  # erase flash sector command
+    write_byte_to_target(0x0C, (addr >> 16) & 0xFF)
+    write_byte_to_target(0x0C, (addr >> 8) & 0xFF)
+    write_byte_to_target(0x0C, addr & 0xFF)
+    write_byte_to_target(0x0D, 0x01)  # flash CS disable
+
+    wait_for_flash_chip()
+
+
+def write_flash_block(addr, block):
+    write_byte_to_target(0x0D, 0x00)  # flash CS enable
+    write_byte_to_target(0x0C, 0x06)  # write enable command
+    write_byte_to_target(0x0D, 0x01)  # flash CS disable
+
+    write_byte_to_target(0x0D, 0x00)  # flash CS enable
+    write_byte_to_target(0x0C, 0x02)  # write flash command
+    write_byte_to_target(0x0C, (addr >> 16) & 0xFF)
+    write_byte_to_target(0x0C, (addr >> 8) & 0xFF)
+    write_byte_to_target(0x0C, addr & 0xFF)
+
+    for b in block:
+        write_byte_to_target(0x0C, b)
+
+    write_byte_to_target(0x0D, 0x01)  # flash CS disable
+
+    wait_for_flash_chip()
+
+
 def hexdump(bytes, address):
     a = address & ~15
     end = address + len(bytes)
@@ -133,7 +187,7 @@ def hexdump(bytes, address):
         a += 1
 
 
-def dump_main(args):
+def dump_ram_main(args):
     connect()
     b = read_bytes_from_target(args.address, args.length)
     hexdump(b, args.address)
@@ -183,8 +237,45 @@ def read_flash_main(args):
             file.write(b)
 
 
-def reset_main(args):
+def do_erase_flash(args):
+    print(
+        "Erasing flash from 0x%08x-0x%08x:"
+        % (args.address, args.address + args.length)
+    )
+    for base in tqdm(
+        iterable=range(
+            args.address, args.address + args.length, FLASH_SECTOR_SIZE
+        ),
+        unit_scale=FLASH_SECTOR_SIZE,
+        unit="B",
+    ):
+        erase_flash_sector(base)
+
+
+def erase_flash_main(args):
     connect()
+    do_erase_flash()
+
+
+def write_flash_main(args):
+    connect()
+    do_erase_flash(args)
+    print(
+        "Writing flash from 0x%08x-0x%08x from '%s':"
+        % (args.address, args.address + args.length, args.filename)
+    )
+    with open(args.filename, "rb") as file:
+        for base in tqdm(
+            iterable=range(args.address, args.address + args.length, 256),
+            unit_scale=256,
+            unit="B",
+        ):
+            b = file.read(256)
+            write_flash_block(base, b)
+
+
+def run_main(args):
+    run()
 
 
 def main():
@@ -192,10 +283,10 @@ def main():
     args_parser.add_argument("--serial-port", type=str, required=True)
     subparsers = args_parser.add_subparsers(dest="cmd", required=True)
 
-    dump_parser = subparsers.add_parser("dump")
-    dump_parser.set_defaults(func=dump_main)
-    dump_parser.add_argument("address", type=lambda x: int(x, 0))
-    dump_parser.add_argument(
+    dump_ram_parser = subparsers.add_parser("dump_ram")
+    dump_ram_parser.set_defaults(func=dump_ram_main)
+    dump_ram_parser.add_argument("address", type=lambda x: int(x, 0))
+    dump_ram_parser.add_argument(
         "length", nargs="?", default=0x100, type=lambda x: int(x, 0)
     )
 
@@ -222,11 +313,30 @@ def main():
         "length", nargs="?", default=0x7D000, type=lambda x: int(x, 0)
     )
 
+    write_flash_parser = subparsers.add_parser("write_flash")
+    write_flash_parser.set_defaults(func=write_flash_main)
+    write_flash_parser.add_argument("filename", type=str)
+    write_flash_parser.add_argument(
+        "address", nargs="?", default=0, type=lambda x: int(x, 0)
+    )
+    write_flash_parser.add_argument(
+        "length", nargs="?", default=0x7D000, type=lambda x: int(x, 0)
+    )
+
+    erase_flash_parser = subparsers.add_parser("erase_flash")
+    erase_flash_parser.set_defaults(func=erase_flash_main)
+    erase_flash_parser.add_argument(
+        "address", nargs="?", default=0, type=lambda x: int(x, 0)
+    )
+    erase_flash_parser.add_argument(
+        "length", nargs="?", default=0x7D000, type=lambda x: int(x, 0)
+    )
+
     get_soc_id_parser = subparsers.add_parser("get_soc_id")
     get_soc_id_parser.set_defaults(func=get_soc_id_main)
 
-    reset_parser = subparsers.add_parser("reset")
-    reset_parser.set_defaults(func=reset_main)
+    run_parser = subparsers.add_parser("run")
+    run_parser.set_defaults(func=run_main)
 
     args = args_parser.parse_args()
 

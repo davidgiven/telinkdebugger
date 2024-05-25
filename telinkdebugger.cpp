@@ -269,6 +269,15 @@ int main()
                     break;
                 }
 
+                case 'g':
+                {
+                    gpio_put(RST_PIN, 0);
+                    sleep_us(100);
+                    gpio_put(RST_PIN, 1);
+                    sleep_us(100);
+                    break;
+                }
+
                 case 's':
                 {
                     uint16_t socid = read_single_debug_word(reg_soc_id);
