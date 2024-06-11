@@ -184,8 +184,8 @@ static void banner()
         "# s            read device socid\n"
         "# RXXXXYYYY    read YYYY bytes from XXXX (values in hex)\n"
         "# WXXXXYYYY... write YYYY bytes to XXXX, folowed by hex pairs\n"
-        "Responses are S for success, E for error, and # is a comment.\n"
-        "Good luck (you'll need it).\n");
+        "# Responses are S for success, E for error, and # is a comment.\n"
+        "# Good luck (you'll need it).\n");
 }
 
 static void init_cmd()
@@ -340,6 +340,10 @@ int main(void)
                 printf("S\n");
                 break;
             }
+
+            case '?':
+                banner();
+                break;
 
             default:
                 printf("?\n");
