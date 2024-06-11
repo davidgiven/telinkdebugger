@@ -1,4 +1,5 @@
-(MIT license)
+# MIT license
+
 Copyright 2024 David Given
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
