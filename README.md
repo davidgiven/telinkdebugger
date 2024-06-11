@@ -1,11 +1,11 @@
-# Telink debugger bridge
+# Telink USB debugger bridge
 
 ## What?
 
 This is a poorly written and hacked together Raspberry Pi Pico-based debugger
 bridge for the Telink SWS protocol. It will allow flashing of Telink-based
-devices, so far only tested on the incredibly cheap LT716 fitness bands using
-the Telink TLSR8232 chip.
+devices via USB, so far only tested on the incredibly cheap LT716 fitness bands
+using the Telink TLSR8232 chip.
 
 It was put together from information pulled from these sources:
 
@@ -37,9 +37,9 @@ Then, connect the Pico to your Telink device as follows:
 No extra components are needed. Just wire it up directly.
 
 When the Pico starts up, it'll put the Telink device into reset and expose two
-CDC serial ports. The first is the control port which is used to communicate
-with the debugger. The second is a standard USB UART interface and is connected
-to the TX and RX pins.
+CDC serial ports via USB. The first is the control port which is used to
+communicate with the debugger. The second is a standard USB UART interface and
+is connected to the TX and RX pins.
 
 There is a Python script provided for communicating with the debugger:
 
