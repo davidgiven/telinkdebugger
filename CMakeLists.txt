@@ -39,20 +39,20 @@ project(telinkdebugger C CXX ASM)
 pico_sdk_init()
 
 add_executable(telinkdebugger
-  telinkdebugger.cpp
-  usb-descriptors.cpp
-  usb-uart.cpp
-  stdio-queue.cpp
+  src/telinkdebugger.cpp
+  src/usb-descriptors.cpp
+  src/usb-uart.cpp
+  src/stdio-queue.cpp
 )
 
 pico_set_program_name(telinkdebugger "telinkdebugger")
 pico_set_program_version(telinkdebugger "0.1")
 
-pico_generate_pio_header(telinkdebugger ${CMAKE_CURRENT_LIST_DIR}/sws.pio)
+pico_generate_pio_header(telinkdebugger ${CMAKE_CURRENT_LIST_DIR}/src/sws.pio)
 
 target_include_directories(telinkdebugger PRIVATE
-  ${CMAKE_CURRENT_LIST_DIR}
-  ${CMAKE_CURRENT_LIST_DIR}/.. # for our common lwipopts or any other standard includes, if required
+  ${CMAKE_CURRENT_LIST_DIR}/src
+  ${CMAKE_CURRENT_LIST_DIR} # for our common lwipopts or any other standard includes, if required
 )
 
 target_include_directories(telinkdebugger PRIVATE
