@@ -4,7 +4,9 @@
             "name": "Pico",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${env:HOME}/.pico-sdk/sdk/1.5.1/**"
+                "${env:HOME}/.pico-sdk/sdk/1.5.1/**",
+                "${env:HOME}/src/",
+                "${env:HOME}/src/8232_BLE_SDK/ble_sdk_hawk"
             ],
             "forcedInclude": [
                 "${env:HOME}/.pico-sdk/sdk/1.5.1/src/common/pico_base/include/pico.h",

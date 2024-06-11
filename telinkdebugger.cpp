@@ -1,15 +1,22 @@
+// SPDX-License-Identifier: MIT
+/*
+ * Copyright (c) 2024 David Given <dg@cowlark.com>
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <tusb.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "hardware/divider.h"
 
 #include "sws.pio.h"
+#include "globals.h"
 
-#define SWS_PIN 20
-#define RST_PIN 21
-#define DBG_PIN 22
+#define SWS_PIN 2
+#define RST_PIN 3
+#define DBG_PIN 4
 #define LED_PIN PICO_DEFAULT_LED_PIN
 
 #define SM_RX 0
@@ -32,8 +39,6 @@
 #define FLD_TMR_WD_EN (1 << 23)
 
 #define reg_debug_runstate REG_ADDR8(0x602)
-
-#define BITS_PER_RECEIVED_BYTE (10 * 10)
 
 static uint32_t input_buffer[BUFFER_SIZE_BITS / 8];
 static uint32_t output_buffer[BUFFER_SIZE_BITS / 8];
@@ -170,8 +175,17 @@ static void set_target_clock_speed(uint8_t speed)
 
 static void banner()
 {
-    printf("# Telink debugger bridge\n");
-    printf("# (help placeholder text here)\n");
+    printf(
+        "# Telink debugger bridge\n"
+        "# Commands:\n"
+        "# i            verify connection to device\n"
+        "# rX           X=[0, 1] set status of reset pin\n"
+        "# g            take device out of reset\n"
+        "# s            read device socid\n"
+        "# RXXXXYYYY    read YYYY bytes from XXXX (values in hex)\n"
+        "# WXXXXYYYY... write YYYY bytes to XXXX, folowed by hex pairs\n"
+        "Responses are S for success, E for error, and # is a comment.\n"
+        "Good luck (you'll need it).\n");
 }
 
 static void init_cmd()
@@ -222,9 +236,10 @@ void set_tx_clock(double clock_hz)
     pio_sm_set_enabled(pio0, SM_TX, true);
 }
 
-int main()
+int main(void)
 {
-    stdio_init_all();
+    usb_bridge_init();
+    stdio_queue_init();
 
     gpio_init(RST_PIN);
     gpio_set_dir(RST_PIN, true);
@@ -241,102 +256,94 @@ int main()
     sws_rx_program_init(pio1, SM_RX, sws_rx_program_offset, SWS_PIN);
     pio_sm_set_enabled(pio1, SM_RX, true);
 
+    banner();
     for (;;)
     {
-        static bool was_usb_connected = false;
-        bool is_usb_connected = stdio_usb_connected();
-        if (is_usb_connected && !was_usb_connected)
-            banner();
-        was_usb_connected = is_usb_connected;
-
-        if (is_usb_connected)
+        int c = getchar();
+        switch (c)
         {
-            int c = getchar();
-            switch (c)
+            case 'i':
+                init_cmd();
+                break;
+
+            case 'r':
             {
-                case 'i':
-                    init_cmd();
-                    break;
-
-                case 'r':
-                {
-                    int i = getchar() == '1';
-                    printf("# reset <- %d\n", i);
-                    gpio_put(RST_PIN, i);
-                    if (i == 0)
-                        is_connected = false;
-                    printf("S\n");
-                    break;
-                }
-
-                case 'g':
-                {
-                    gpio_put(RST_PIN, 0);
-                    sleep_us(100);
-                    gpio_put(RST_PIN, 1);
-                    sleep_us(100);
-                    break;
-                }
-
-                case 's':
-                {
-                    uint16_t socid = read_single_debug_word(reg_soc_id);
-                    printf("# socid = %04x\nS\n", socid);
-                    break;
-                }
-
-                case 'R':
-                {
-                    uint16_t address = read_hex_word();
-                    uint16_t count = read_hex_word();
-
-                    if (count)
-                    {
-                        uint8_t b = read_first_debug_byte(address);
-                        printf("%02x", b);
-                        count--;
-
-                        while (count--)
-                        {
-                            b = read_next_debug_byte();
-                            printf("%02x", b);
-                        }
-
-                        finish_reading_debug_bytes();
-                        printf("\n");
-                    }
-                    printf("S\n");
-                    break;
-                }
-
-                case 'W':
-                {
-                    uint16_t address = read_hex_word();
-                    uint16_t count = read_hex_word();
-
-                    if (count)
-                    {
-                        uint8_t b = read_hex_byte();
-                        write_first_debug_byte(address, b);
-                        count--;
-
-                        while (count--)
-                        {
-                            b = read_hex_byte();
-                            write_next_debug_byte(b);
-                        }
-
-                        finish_writing_debug_bytes();
-                    }
-
-                    printf("S\n");
-                    break;
-                }
-
-                default:
-                    printf("?\n");
-                    printf("# unknown command\n");
+                int i = getchar() == '1';
+                printf("# reset <- %d\n", i);
+                gpio_put(RST_PIN, i);
+                if (i == 0)
+                    is_connected = false;
+                printf("S\n");
+                break;
             }
+
+            case 'g':
+            {
+                gpio_put(RST_PIN, 0);
+                sleep_us(100);
+                gpio_put(RST_PIN, 1);
+                sleep_us(100);
+                break;
+            }
+
+            case 's':
+            {
+                uint16_t socid = read_single_debug_word(reg_soc_id);
+                printf("# socid = %04x\nS\n", socid);
+                break;
+            }
+
+            case 'R':
+            {
+                uint16_t address = read_hex_word();
+                uint16_t count = read_hex_word();
+
+                if (count)
+                {
+                    uint8_t b = read_first_debug_byte(address);
+                    printf("%02x", b);
+                    count--;
+
+                    while (count--)
+                    {
+                        b = read_next_debug_byte();
+                        printf("%02x", b);
+                    }
+
+                    finish_reading_debug_bytes();
+                    printf("\n");
+                }
+                printf("S\n");
+                break;
+            }
+
+            case 'W':
+            {
+                uint16_t address = read_hex_word();
+                uint16_t count = read_hex_word();
+
+                if (count)
+                {
+                    uint8_t b = read_hex_byte();
+                    write_first_debug_byte(address, b);
+                    count--;
+
+                    while (count--)
+                    {
+                        b = read_hex_byte();
+                        write_next_debug_byte(b);
+                    }
+
+                    finish_writing_debug_bytes();
+                }
+
+                printf("S\n");
+                break;
+            }
+
+            default:
+                printf("?\n");
+                printf("# unknown command\n");
         }
     }
 }

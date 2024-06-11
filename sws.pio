@@ -1,3 +1,7 @@
+; SPDX-License-Identifier: MIT
+;
+; Copyright (c) 2024 David Given <dg@cowlark.com>
+
 .program sws_tx
 .side_set 1 opt
     ; Sends nine bits of data.

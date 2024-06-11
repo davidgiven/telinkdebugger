@@ -3,6 +3,7 @@ import argparse
 import serial
 from tqdm import tqdm
 import sys
+import os
 
 serial_port = None
 
@@ -259,12 +260,15 @@ def erase_flash_main(args):
 
 def write_flash_main(args):
     connect()
-    do_erase_flash(args)
-    print(
-        "Writing flash from 0x%08x-0x%08x from '%s':"
-        % (args.address, args.address + args.length, args.filename)
-    )
     with open(args.filename, "rb") as file:
+        file.seek(0, os.SEEK_END)
+        args.length = min(args.length, file.tell())
+        file.seek(0, os.SEEK_SET)
+        do_erase_flash(args)
+        print(
+            "Writing flash from 0x%08x-0x%08x from '%s':"
+            % (args.address, args.address + args.length, args.filename)
+        )
         for base in tqdm(
             iterable=range(args.address, args.address + args.length, 256),
             unit_scale=256,
@@ -273,6 +277,10 @@ def write_flash_main(args):
             b = file.read(256)
             write_flash_block(base, b)
 
+
+def writeb_main(args):
+    print("Writing 0x%02x to 0x%04x" % (args.value, args.address))
+    write_byte_to_target(args.address, args.value)
 
 def run_main(args):
     run()
@@ -337,6 +345,11 @@ def main():
 
     run_parser = subparsers.add_parser("run")
     run_parser.set_defaults(func=run_main)
+
+    writeb_parser = subparsers.add_parser("writeb")
+    writeb_parser.set_defaults(func=writeb_main)
+    writeb_parser.add_argument("address", type=lambda x: int(x, 0))
+    writeb_parser.add_argument("value", type=lambda x: int(x, 0))
 
     args = args_parser.parse_args()
 
