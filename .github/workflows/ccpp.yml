@@ -15,7 +15,7 @@ jobs:
       run: sudo apt update && sudo apt install build-essential cmake
     - name: make
       run: |
-        cmake -S . -B build
+        cmake -S . -B build -DPICO_SDK_FETCH_FROM_GIT=ON
         make -C build -j $(nprocs)
 
     - name: upload
