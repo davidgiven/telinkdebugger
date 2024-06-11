@@ -19,7 +19,7 @@ jobs:
       run: sudo apt update && sudo apt install build-essential cmake
     - name: make
       run: |
-        cmake -S . -B build -DPICO_SDK_FETCH_FROM_GIT=ON
+        cmake -S . -B build
         make -C build -j $(nprocs)
 
     - name: date
