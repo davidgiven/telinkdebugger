@@ -15,7 +15,6 @@ jobs:
       run: sudo apt update && sudo apt install build-essential cmake
     - name: make
       run: |
-        mkdir build
         cmake -S . -B build
         make -C build -j $(nprocs)
 
