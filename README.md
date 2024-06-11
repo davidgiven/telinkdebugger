@@ -29,8 +29,8 @@ file (no wireless necessary).
 
 Then, connect the Pico to your Telink device as follows:
 
-- Telink TX -> Pico pin 1 (GPIO0)
-- Telink RX -> Pico pin 2 (GPIO1)
+- Telink RX -> Pico pin 1 (GPIO0)
+- Telink TX -> Pico pin 2 (GPIO1)
 - Telink SWS -> Pico pin 4 (GPIO2)
 - Telink RST -> Pico pin 5 (GPIO3)
 
