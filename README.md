@@ -22,7 +22,7 @@ Please get in touch if you're interested.
 ## How?
 
 You can either get a precompiled binary from [the Github releases
-page](https://github.com/davidgiven/telinkdebugger/releases) or build it
+page](https://github.com/davidgiven/telinkdebugger/releases/tag/dev) or build it
 yourself. It's a standard Raspberry Pi Pico project, so you should just be able
 to run the cmakefile and it'll build. Flash a normal Pico with the resulting
 file (no wireless necessary).
