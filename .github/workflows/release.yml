@@ -1,0 +1,57 @@
+name: Autorelease
+
+concurrency: 
+  group: autorelease-${{ github.head_ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - "master"
+  workflow_dispatch:
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: apt
+      run: sudo apt update && sudo apt install build-essential cmake
+    - name: make
+      run: |
+        cmake -S . -B build
+        make -C build -j $(nprocs)
+
+    - name: date
+      run: |
+        echo "RELEASE_DATE=$(date --rfc-3339=date)" >> ${GITHUB_ENV}
+  
+    - name: tag
+      uses: EndBug/latest-tag@latest
+      with:
+        tag-name: dev
+        force-branch: false
+        git-directory: 'wordgrinder'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: delete-old-assets
+      uses: mknejp/delete-release-assets@v1
+      with:
+        token: ${{ github.token }}
+        tag: dev
+        assets: | 
+          telinkdebugger.uf2
+
+    - name: release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Development build ${{ env.RELEASE_DATE }}
+        files: |
+          build/telinkdebugger.uf2
+        tag_name: dev
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+     
+  
+
