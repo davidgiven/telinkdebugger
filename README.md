@@ -86,6 +86,6 @@ there.
 ## License
 
 Everything here is, as far as I know, either public domain or redistributable
-under the terms of the MIT license. See the (LICENSE.md)[LICENSE.md] file for
+under the terms of the MIT license. See the [LICENSE.md](LICENSE.md) file for
 the full text. For more information about the authors look at the header of each
 file.
