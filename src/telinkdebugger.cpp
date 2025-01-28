@@ -12,7 +12,8 @@
 #include "hardware/divider.h"
 
 #include "sws.pio.h"
-#include "globals.h"
+#include <stdio-queue.h>
+#include <usb-uart.h>
 
 #define SWS_PIN 2
 #define RST_PIN 3

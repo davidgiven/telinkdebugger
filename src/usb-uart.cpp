@@ -11,7 +11,6 @@
 #include <pico/util/queue.h>
 #include <string.h>
 #include <tusb.h>
-#include "globals.h"
 
 #if !defined(MIN)
 #define MIN(a, b) ((a > b) ? b : a)
