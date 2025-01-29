@@ -3,9 +3,13 @@
  * Copyright (c) 2024 David Given <dg@cowlark.com>
  */
 
+#include <stdio-queue.h>
+
+#include <usb-uart.h>
+
+#include <pico/stdio/driver.h>
 #include <stdio.h>
-#include "globals.h"
-#include "pico/stdio/driver.h"
+
 
 static void stdio_queue_out_chars(const char* buf, int length)
 {
