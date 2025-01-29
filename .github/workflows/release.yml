@@ -44,7 +44,7 @@ jobs:
           telinkdebugger.uf2
 
     - name: release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         name: Development build ${{ env.RELEASE_DATE }}
         files: |
