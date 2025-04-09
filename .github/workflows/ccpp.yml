@@ -19,9 +19,7 @@ jobs:
         make -C build -j $(nprocs)
 
     - name: upload
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ github.event.repository.name }}.${{ github.sha }}
         path: build/telinkdebugger.uf2
-
-
